@@ -1,0 +1,78 @@
+# Builds the Windows installer (DigUp-*-setup.exe, NSIS, per-user, no admin prompt) and keeps it as the run's artifact.
+# Adapted from upstream DigUp's packages.yml `windows` job (ARahim3/DigUp@f3decb0). Runs on every push to a branch and
+# by hand (Actions → Windows → Run workflow). Download the installer from the run's "DigUp-windows-x64" artifact.
+name: Windows
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The small ffmpeg is built once per version of its build script (build-ffmpeg.sh does nothing when it's there).
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: ffmpeg
+        with:
+          path: Vendor/ffmpeg
+          key: ffmpeg-windows-${{ hashFiles('scripts/build-ffmpeg.sh') }}
+      - uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2.33.0
+        if: steps.ffmpeg.outputs.cache-hit != 'true'
+        with:
+          msystem: MINGW64
+          release: false   # the runner's own MSYS2
+          update: true
+          install: >-
+            make mingw-w64-x86_64-gcc mingw-w64-x86_64-meson mingw-w64-x86_64-ninja mingw-w64-x86_64-nasm
+            mingw-w64-x86_64-pkgconf mingw-w64-x86_64-zlib
+      - name: ffmpeg
+        # The small LGPL ffmpeg the installer carries (as the Linux packages do): only what DigUp reads, so its licenses
+        # are FFmpeg's, dav1d's and zlib's. Built with MSYS2's MinGW compilers, before the MSVC environment.
+        if: steps.ffmpeg.outputs.cache-hit != 'true'
+        shell: msys2 {0}
+        run: scripts/build-ffmpeg.sh
+      - uses: compnerd/gha-setup-swift@bbae8ce86bac5a3449f3992b3d88bc4ca25f2057 # v0.5.0
+        with:
+          swift-version: swift-6.4.0-release
+          swift-build: 6.4.0-RELEASE
+      - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+      - name: Vulkan SDK
+        shell: bash
+        run: |
+          version=1.4.363.0
+          temp=$(cygpath -u "$RUNNER_TEMP")
+          curl -fsSL -o "$temp/vulkansdk.exe" \
+            "https://sdk.lunarg.com/sdk/download/$version/windows/vulkansdk-windows-X64-$version.exe"
+          echo "94a82d378f7a5e3e54c9db7d2fb7016af136e14ac0a18dbf0f2f67a36352d141  $temp/vulkansdk.exe" | sha256sum -c -
+          "$temp/vulkansdk.exe" --root "C:\\VulkanSDK\\$version" --accept-licenses --default-answer --confirm-command install
+          echo "VULKAN_SDK=C:\\VulkanSDK\\$version" >> "$GITHUB_ENV"
+          echo "C:\\VulkanSDK\\$version\\Bin" >> "$GITHUB_PATH"
+      - name: Build
+        shell: bash
+        run: |
+          # MSVC's tools before Git's: Git's /usr/bin/link (coreutils) would stand in for link.exe.
+          export PATH="$(dirname "$(command -v cl)"):$PATH"
+          scripts/fetch-vendor.sh
+          scripts/build-llama.sh
+          scripts/package-windows.sh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: DigUp-windows-x64
+          path: |
+            shell/src-tauri/target/release/bundle/nsis/*.exe
+            shell/src-tauri/target/release/bundle/nsis/*.exe.sig
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: models
+          key: embeddinggemma-2-q8_0-bfcd298-windows
+      - name: The installer
+        shell: bash
+        run: MODELS="$PWD/models" scripts/check-windows-package.sh shell/src-tauri/target/release/bundle/nsis/*-setup.exe

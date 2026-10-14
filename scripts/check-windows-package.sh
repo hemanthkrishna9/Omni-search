@@ -5,7 +5,7 @@
 # note from the search panel; then its helper runs with only Windows on PATH (everything else it needs is beside it), and
 # digup-ocr runs on its own. In Git for Windows' bash; the packages workflow
 # runs it after building the installer.
-#   MODELS=<folder> scripts/check-windows-package.sh <DigUp_x.y.z_x64-setup.exe>
+#   MODELS=<folder> scripts/check-windows-package.sh <DigUp_x.y.z_<arch>-setup.exe>
 set -euo pipefail
 cd "$(dirname "$0")/.."
 setup=${1:?the installer}
@@ -108,6 +108,28 @@ if [[ $check_code == 0 ]]; then
     "$helper" index "$(win "$work/ocr-files")" --index "$(win "$work/ocr-index")" > /dev/null
   PATH="/c/Windows/System32:/c/Windows:/c/Windows/System32/Wbem" DIGUP_MODELS="$models" \
     "$helper" search 48213 --index "$(win "$work/ocr-index")" -n 3 | tee "$work/ocr-search.txt"
-  grep -q "Screenshot invoice.png" "$work/ocr-search.txt" || { echo "searching 48213 didn't find the screenshot"; exit 1; }
+  grep -Eq '^ *1\..*Screenshot invoice\.png' "$work/ocr-search.txt" || { echo "searching 48213 didn't rank the screenshot first"; exit 1; }
+
+  # A second language: the runner has Russian OCR and ru-RU in the user's languages (the workflow's step before this),
+  # so digup-ocr reads with both engines and keeps the one whose script fits. The file name is not ASCII, which
+  # exercises non-ASCII paths. (ё is left out of the assertions: OCR may give е.)
+  echo "OCR in a second language"
+  cp Tests/DigUpKitTests/Pictures/ocr-russian.png "$work/ocr-files/Screenshot счёт.png"
+  "$ocr" "$(win "$work/ocr-files/Screenshot счёт.png")" | tee "$work/ocr-russian.txt"
+  grep -q 73591 "$work/ocr-russian.txt" || { echo "digup-ocr didn't read the Russian invoice number"; exit 1; }
+  grep -q "оплачен" "$work/ocr-russian.txt" || { echo "digup-ocr didn't read the Russian word (is Russian OCR installed?)"; exit 1; }
+  "$ocr" "$(win "$work/ocr-files/Screenshot invoice.png")" > "$work/ocr-invoice.txt"
+  grep -q 48213 "$work/ocr-invoice.txt" || { echo "with two languages, digup-ocr didn't read the English invoice"; exit 1; }
+
+  # A scan: a PDF whose only page is a picture of text, read with OCR when it is indexed.
+  cp Tests/DigUpKitTests/Pictures/ocr-scan.pdf "$work/ocr-files/lease scan.pdf"
+  PATH="/c/Windows/System32:/c/Windows:/c/Windows/System32/Wbem" DIGUP_MODELS="$models" \
+    "$helper" index "$(win "$work/ocr-files")" --index "$(win "$work/ocr-index")" > /dev/null
+  for found in "73591:Screenshot счёт.png" "48213:Screenshot invoice.png" "61844:lease scan.pdf"; do
+    PATH="/c/Windows/System32:/c/Windows:/c/Windows/System32/Wbem" DIGUP_MODELS="$models" \
+      "$helper" search "${found%%:*}" --index "$(win "$work/ocr-index")" -n 3 | tee "$work/ocr-search.txt"
+    grep -E '^ *1\.' "$work/ocr-search.txt" | grep -qF "${found#*:}" \
+      || { echo "searching ${found%%:*} didn't rank ${found#*:} first"; exit 1; }
+  done
 fi
 echo "ok"

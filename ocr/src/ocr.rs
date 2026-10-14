@@ -12,7 +12,10 @@ use windows::Graphics::Imaging::{
 use windows::Media::Ocr::OcrEngine;
 use windows::Storage::Streams::{Buffer, DataReader, DataWriter};
 use windows::Storage::{FileAccessMode, StorageFile};
+use windows::System::UserProfile::GlobalizationPreferences;
 use windows::Win32::System::WinRT::{RoInitialize, RO_INIT_MULTITHREADED};
+
+use crate::script::{self, Script};
 
 /// Exit code for a picture that can't be read.
 const FAILED: i32 = 1;
@@ -29,16 +32,17 @@ pub fn run() -> i32 {
     // initialized is fine too.
     let _ = unsafe { RoInitialize(RO_INIT_MULTITHREADED) };
 
-    let Some(engine) = engine() else {
+    let engines = engines();
+    if engines.is_empty() {
         eprintln!(
             "no OCR language is installed (Settings \u{2192} Time & language \u{2192} Language & region \u{2192} add a language with Optical character recognition)"
         );
         return NO_LANGUAGE;
-    };
+    }
     if check {
         return 0;
     }
-    match recognize(&engine, Path::new(&arg)) {
+    match recognize(&engines, Path::new(&arg)) {
         Ok(text) => {
             let mut out = std::io::stdout().lock();
             if out.write_all(text.as_bytes()).and_then(|_| out.flush()).is_err() {
@@ -53,8 +57,51 @@ pub fn run() -> i32 {
     }
 }
 
+/// The engines to read with, each with the script its language is written in: the first engine of each script among
+/// the profile's languages (in the person's order; en-US, en-GB and de would read the same Latin text three times),
+/// each recognizer language once, or, when that leaves one or none, the single fallback engine.
+fn engines() -> Vec<(Script, OcrEngine)> {
+    let mut found: Vec<(Script, String, OcrEngine)> = Vec::new();
+    if let Ok(languages) = GlobalizationPreferences::Languages() {
+        for tag in languages {
+            let tag = tag.to_string_lossy();
+            let script = script::script_of(&tag);
+            if found.iter().any(|(seen, _, _)| *seen == script) {
+                continue;
+            }
+            let engine = Language::CreateLanguage(&HSTRING::from(tag.as_str()))
+                .ok()
+                .filter(|language| OcrEngine::IsLanguageSupported(language).unwrap_or(false))
+                .and_then(|language| OcrEngine::TryCreateFromLanguage(&language).ok());
+            if let Some(engine) = engine {
+                let recognizer = recognizer_tag(&engine);
+                if found.iter().any(|(_, seen, _)| seen.eq_ignore_ascii_case(&recognizer)) {
+                    continue;
+                }
+                found.push((script, recognizer, engine));
+            }
+        }
+    }
+    // One language (or none): as before, no extra engines and no extra work.
+    if found.len() > 1 {
+        return found.into_iter().map(|(script, _, engine)| (script, engine)).collect();
+    }
+    match fallback_engine() {
+        Some(engine) => vec![(script::script_of(&recognizer_tag(&engine)), engine)],
+        None => Vec::new(),
+    }
+}
+
+fn recognizer_tag(engine: &OcrEngine) -> String {
+    engine
+        .RecognizerLanguage()
+        .and_then(|language| language.LanguageTag())
+        .map(|tag| tag.to_string_lossy())
+        .unwrap_or_default()
+}
+
 /// The engine for the languages the person has installed, else English, else the first language the OCR offers.
-fn engine() -> Option<OcrEngine> {
+fn fallback_engine() -> Option<OcrEngine> {
     if let Ok(engine) = OcrEngine::TryCreateFromUserProfileLanguages() {
         return Some(engine);
     }
@@ -67,11 +114,24 @@ fn engine() -> Option<OcrEngine> {
     OcrEngine::TryCreateFromLanguage(&first).ok()
 }
 
-fn recognize(engine: &OcrEngine, path: &Path) -> Result<String, String> {
+/// Reads the picture with every engine: the text that fits its language's script best, then the others' lines it lacks.
+fn recognize(engines: &[(Script, OcrEngine)], path: &Path) -> Result<String, String> {
     let full = std::path::absolute(path).map_err(|error| format!("can't open {}: {error}", path.display()))?;
     let bitmap = decode(&full).map_err(|error| format!("can't read the image: {error}"))?;
+    let mut texts: Vec<(Script, String)> = Vec::new();
+    let mut failure = None;
+    for (script, engine) in engines {
+        match read(engine, &bitmap) {
+            Ok(text) => texts.push((*script, text)),
+            Err(message) => failure = Some(message),
+        }
+    }
+    script::merge(&texts).ok_or_else(|| failure.unwrap_or_else(|| "OCR failed".to_string()))
+}
+
+fn read(engine: &OcrEngine, bitmap: &SoftwareBitmap) -> Result<String, String> {
     let result = engine
-        .RecognizeAsync(&bitmap)
+        .RecognizeAsync(bitmap)
         .and_then(|operation| operation.join())
         .map_err(|error| format!("OCR failed: {error}"))?;
     let lines = result.Lines().map_err(|error| format!("OCR failed: {error}"))?;

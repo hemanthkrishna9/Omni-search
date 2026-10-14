@@ -12,8 +12,9 @@ of the Mac's SwiftUI app. This repo builds that port into an installer. Upstream
 
 ## Get the installer
 
-1. Open **Actions → Windows** in this repo. It runs on every push, or start it with **Run workflow**.
-2. When the run is green, download the **DigUp-windows-x64** artifact and unzip it.
+1. Open **Actions → Windows** in this repo (**Windows ARM64** for Snapdragon and other ARM PCs). They run on every
+   push, or start one with **Run workflow**.
+2. When the run is green, download the **DigUp-windows-x64** (or **DigUp-windows-arm64**) artifact and unzip it.
 3. Run `DigUp_*-setup.exe`. It installs for your user only, with no admin prompt. The installer isn't code-signed, so
    SmartScreen may warn you first: pick *More info → Run anyway*.
 4. On first launch DigUp downloads the model once (865 MB) from Hugging Face. After that it works offline. Pick the
@@ -30,14 +31,17 @@ of the Mac's SwiftUI app. This repo builds that port into an installer. Upstream
 - Text in screenshots (recognized by their file name, e.g. "Screenshot …") and in scanned PDF pages is read with Windows'
   built-in OCR, through `digup-ocr.exe` beside the helper; other pictures aren't OCR'd. It needs an OCR language
   installed: most display languages come with one. To add one, go to Settings → Time & language → Language & region →
-  add a language with Optical character recognition.
-- RAW camera photos (CR2, NEF, ARW, DNG…) aren't read yet.
+  add a language with Optical character recognition. With several OCR languages in your language list (say English
+  and Russian), each one reads the picture, so words in any of them are found.
+- RAW camera photos (CR2, NEF, ARW, DNG, ORF, RW2, RAF) are read through the full-size JPEG preview the camera stores
+  inside them. A RAW without one, like many phone DNGs, isn't read.
 - OneDrive files that live only in the cloud are skipped, never downloaded.
-- x64 only. A GPU with Vulkan is used when it runs the model faster than the CPU; otherwise the CPU is used.
+- On x64, a GPU with Vulkan is used when it runs the model faster than the CPU; otherwise the CPU is used. The ARM64
+  build runs the model on the CPU (ARMv8.2 or later: Snapdragon 8cx, 7c, X Elite and newer).
 
 ## Build it yourself on Windows
 
-Follow `.github/workflows/windows.yml`. You need Visual Studio's C++ tools, Swift 6.4, Rust, Node, Python, the Vulkan
+Follow `.github/workflows/windows.yml` (or `windows-arm64.yml`, with MSYS2's CLANGARM64 shell and no Vulkan SDK). You need Visual Studio's C++ tools, Swift 6.4, Rust, Node, Python, the Vulkan
 SDK, Git for Windows and MSYS2. Then:
 
 ```sh

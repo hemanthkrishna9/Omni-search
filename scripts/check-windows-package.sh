@@ -34,6 +34,19 @@ Cream the butter and sugar, beat in three eggs, then fold in the flour, the zest
 Bake for forty minutes at 180 degrees and pour the lemon syrup over it while it is still warm.
 TEXT
 
+# The helper on its own first: a binary that can't start (a missing DLL, a wrong architecture) says so here.
+echo "the helper starts"
+"$installed/helper/digup.exe" status --index "$(win "$work/probe-index")" || { echo "digup.exe failed: $?"; exit 1; }
+
+# What DigUp and its helpers logged, for a launch that goes wrong: the shell's log folder and the index folder.
+show_logs() {
+  local folder
+  for folder in "$(cygpath -u "$LOCALAPPDATA")/com.abdurrahim.DigUp/logs" "$work/index"; do
+    [[ -d $folder ]] || continue
+    find "$folder" -name '*.log' -print0 | while IFS= read -r -d '' log; do echo "--- $log"; tail -40 "$log"; done
+  done
+}
+
 echo "first launch"
 started=$(date +%s)
 "$installed/DigUp.exe" --index "$(win "$work/index")" --models "$models" --settings "$(win "$work/settings.json")" \
@@ -58,6 +71,7 @@ echo "after $(( $(date +%s) - started )) s"
 if [[ -z $report ]]; then
   echo "--- stdout"; tail -20 "$work/out.txt"
   echo "--- stderr"; tail -40 "$work/err.txt"
+  show_logs
   echo "no report from the panel"
   exit 1
 fi

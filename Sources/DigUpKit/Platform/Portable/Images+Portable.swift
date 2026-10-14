@@ -1,5 +1,6 @@
 // Pictures without ImageIO (Linux, Windows): stb_image decodes, stb_image_resize2 scales, stb_image_write encodes
-// (Vendor/stb, scripts/fetch-vendor.sh); what stb can't read goes through ffmpeg.
+// (Vendor/stb, scripts/fetch-vendor.sh); what stb can't read goes through ffmpeg. Text in screenshots and scans is read
+// on Windows by digup-ocr (Windows.Media.Ocr), beside the helper; Linux has no OCR yet.
 #if !canImport(ImageIO)
 import CStb
 import Foundation
@@ -70,12 +71,97 @@ extension ImageExtractor {
     }
 }
 
+#if os(Windows)
+extension OCR {
+    /// `digup-ocr.exe` in the folder $DIGUP_OCR names, beside the helper, or on PATH (as `FFmpeg.find` looks).
+    private static let tool = FFmpeg.find("digup-ocr", variable: "DIGUP_OCR")
+
+    /// Set when OCR is given up for the rest of the run: the tool says no OCR language is installed (exit 2), or a
+    /// reading timed out (the helper's per-file watchdog would otherwise kill it, page after page).
+    private final class Stopped: @unchecked Sendable {
+        let lock = NSLock()
+        var value = false
+    }
+    private static let stopped = Stopped()
+
+    /// Whether `digup-ocr --check` says an OCR language is installed (exit 0). Asked once per run, on first use (a
+    /// `static let` is initialized lazily and thread-safely); any failure counts as no.
+    private static let hasLanguage: Bool = {
+        guard let tool else { return false }
+        if case .finished(0, _) = launch(tool, ["--check"], timeout: 15) { return true }
+        return false
+    }()
+
+    /// The tool is there and has a language to read with, and hasn't been given up on. Scans (PDF pages that are
+    /// pictures) are read through it too.
+    static var isAvailable: Bool {
+        tool != nil && !stopped.lock.withLock { stopped.value } && hasLanguage
+    }
+
+    /// A reading that takes longer than this (seconds) is stopped.
+    private static let timeout = 30.0
+
+    /// `Process` isn't Sendable, and the watchdog needs it.
+    private final class Running: @unchecked Sendable {
+        let process: Process
+        let lock = NSLock()
+        var timedOut = false
+        init(_ process: Process) { self.process = process }
+    }
+
+    private enum Outcome {
+        case finished(Int32, Data)   // exit status, standard output
+        case timedOut
+        case failed                  // wouldn't start
+    }
+
+    /// Runs the tool with `arguments`, stopping it after `timeout` seconds.
+    private static func launch(_ tool: String, _ arguments: [String], timeout: Double) -> Outcome {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: tool)
+        process.arguments = arguments
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        process.standardInput = FileHandle.nullDevice
+        do { try process.run() } catch { return .failed }
+        let running = Running(process)
+        let watchdog = DispatchWorkItem {
+            guard running.process.isRunning else { return }
+            running.lock.withLock { running.timedOut = true }
+            running.process.terminate()
+        }
+        DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: watchdog)
+        // Read to the end before waiting: a full pipe would stall the tool. Stopping the tool closes the pipe.
+        let data = (try? output.fileHandleForReading.readToEnd()) ?? Data()
+        process.waitUntilExit()
+        watchdog.cancel()
+        if running.lock.withLock({ running.timedOut }) { return .timedOut }
+        return .finished(process.terminationStatus, data)
+    }
+
+    /// The text `digup-ocr` reads in the picture, lines joined by "\n"; "" when there's none or anything goes wrong.
+    /// After a timeout or a missing language it reads nothing more in this run.
+    static func text(ofImageAt url: URL) -> String {
+        guard isAvailable, let tool else { return "" }
+        switch launch(tool, [url.path], timeout: timeout) {
+        case .finished(0, let data):
+            return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        case .finished(2, _), .timedOut:
+            stopped.lock.withLock { stopped.value = true }
+            return ""
+        case .finished, .failed: return ""
+        }
+    }
+}
+#else
 extension OCR {
     static let isAvailable = false
 
     /// No text recognition here yet: screenshots have their picture vector and their name.
     static func text(ofImageAt url: URL) -> String { "" }
 }
+#endif
 
 /// Packed 8-bit RGB in memory: what stb decodes to and encodes from.
 struct RGBImage {

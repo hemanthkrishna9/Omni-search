@@ -11,10 +11,14 @@ cd "$(dirname "$0")/.."
 TAURI_CLI=2.12.2
 
 swift build -c release --product digup
+# The OCR program the helper runs on screenshots (Windows' built-in OCR; it has its own Cargo.lock). Cargo reads
+# ocr/.cargo/config.toml (the static C runtime) only when run from ocr/.
+(cd ocr && cargo build --release --locked)
 
 # What the installer puts beside DigUp.exe, in helper\ ("DigUp.exe" and "digup.exe" can't share a folder): the helper
-# finds the DLLs, llama.cpp's backends and ffmpeg in its own folder. The C++ runtime goes with them, so nothing needs
-# installing first; the shell itself links its C runtime statically (.cargo/config.toml).
+# finds the DLLs, llama.cpp's backends, ffmpeg and digup-ocr.exe (the OCR program) in its own folder. The C++ runtime
+# goes with them, so nothing needs installing first; the shell itself links its C runtime statically
+# (.cargo/config.toml).
 swift_root=$(cd "$(dirname "$(command -v swift)")/../../../.." && pwd)   # …/Swift from …/Swift/Toolchains/*/usr/bin
 swift_runtime=$(ls -d "$swift_root"/Runtimes/*/usr/bin | tail -1)
 crt=$(ls -d "$(cygpath "$VCToolsRedistDir")"x64/Microsoft.VC*.CRT | tail -1)   # set by the developer environment
@@ -25,17 +29,19 @@ cp .build/release/digup.exe Vendor/llama/lib/*.dll Vendor/pdfium/bin/pdfium.dll 
 cp "$swift_runtime"/*.dll "$helper/"
 cp "$crt"/*.dll "$helper/"   # over the Swift runtime's copies of the same: the newer C++ runtime
 cp Vendor/ffmpeg/bin/ffmpeg.exe Vendor/ffmpeg/bin/ffprobe.exe "$helper/"   # the small static build, no DLLs
+cp ocr/target/release/digup-ocr.exe "$helper/"
 
 # With the release's signing key (TAURI_SIGNING_PRIVATE_KEY, and its password) the packages that update themselves are
 # signed for in-app updates (a .sig beside each). Installed copies check those signatures with the public key in
-# tauri.conf.json (plugins.updater.pubkey): a release built without it could never update.
+# tauri.conf.json (plugins.updater.pubkey): a release built without it could never update. This build has no update
+# feed or public key (updates.rs), so there is nothing to sign for, and a key that is set is left unused.
 signing=
 if [[ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]]; then
   if grep -q '"pubkey": ""' shell/src-tauri/tauri.conf.json; then
-    echo "the signing key is set, but plugins.updater.pubkey in shell/src-tauri/tauri.conf.json is empty" >&2
-    exit 1
+    echo "the signing key is set, but plugins.updater.pubkey in shell/src-tauri/tauri.conf.json is empty: not signing" >&2
+  else
+    signing=',"createUpdaterArtifacts":true'
   fi
-  signing=',"createUpdaterArtifacts":true'
 fi
 # The license of everything the installer carries, installed beside the app. (python3 can be the Store's stub.)
 python=python3

@@ -2,7 +2,8 @@
 """Writes the third-party notices DigUp's Windows and Linux packages carry: the license of every library they ship, from
 the libraries' own license files (llama.cpp's and PDFium's from Vendor/, ffmpeg's, dav1d's and zlib's from the small
 ffmpeg scripts/build-ffmpeg.sh makes, Swift's from the toolchain or scripts/licenses), and of every Rust crate the app
-is built from (Cargo's own record of them, normal dependencies only: build tools and macros don't end up in the app).
+(and on Windows, its OCR program ocr/) is built from (Cargo's own record of them, normal dependencies only: build tools
+and macros don't end up in the app).
 
     scripts/notices.py linux|windows <out.txt>
 
@@ -70,30 +71,35 @@ def miniz_license():
 
 
 def rust_crates(platform):
-    """The crates in the app's binary for the platform: Cargo's resolve graph from the app, through normal
-    dependencies, without proc-macro crates (they run while compiling)."""
+    """The crates in the app's binaries for the platform: Cargo's resolve graph from the app (and, on Windows, from the
+    OCR program digup-ocr.exe), through normal dependencies, without proc-macro crates (they run while compiling)."""
     target = {"linux": "x86_64-unknown-linux-gnu", "windows": "x86_64-pc-windows-msvc"}[platform]
-    metadata = json.loads(subprocess.run(
-        ["cargo", "metadata", "--format-version", "1", "--locked", "--filter-platform", target],
-        cwd=ROOT / "shell/src-tauri", check=True, capture_output=True, encoding="utf-8").stdout)
-    packages = {package["id"]: package for package in metadata["packages"]}
-    nodes = {node["id"]: node for node in metadata["resolve"]["nodes"]}
-    root = metadata["resolve"]["root"]
-    seen, stack = set(), [root]
-    while stack:
-        current = stack.pop()
-        if current in seen:
-            continue
-        seen.add(current)
-        for dependency in nodes[current]["deps"]:
-            if not any(kind["kind"] is None for kind in dependency["dep_kinds"]):
+    manifests = ["shell/src-tauri/Cargo.toml"] + (["ocr/Cargo.toml"] if platform == "windows" else [])
+    found = {}   # cargo's package id (name, version and source) → the package; a crate both programs use is listed once
+    for manifest in manifests:
+        metadata = json.loads(subprocess.run(
+            ["cargo", "metadata", "--format-version", "1", "--locked", "--filter-platform", target,
+             "--manifest-path", str(ROOT / manifest)],
+            cwd=ROOT, check=True, capture_output=True, encoding="utf-8").stdout)
+        packages = {package["id"]: package for package in metadata["packages"]}
+        nodes = {node["id"]: node for node in metadata["resolve"]["nodes"]}
+        root = metadata["resolve"]["root"]
+        seen, stack = set(), [root]
+        while stack:
+            current = stack.pop()
+            if current in seen:
                 continue
-            package = packages[dependency["pkg"]]
-            if any("proc-macro" in target_["kind"] for target_ in package["targets"]):
-                continue
-            stack.append(dependency["pkg"])
-    seen.discard(root)
-    return sorted((packages[i] for i in seen), key=lambda package: (package["name"], package["version"]))
+            seen.add(current)
+            for dependency in nodes[current]["deps"]:
+                if not any(kind["kind"] is None for kind in dependency["dep_kinds"]):
+                    continue
+                package = packages[dependency["pkg"]]
+                if any("proc-macro" in target_["kind"] for target_ in package["targets"]):
+                    continue
+                stack.append(dependency["pkg"])
+        seen.discard(root)
+        found.update({i: packages[i] for i in seen})
+    return sorted(found.values(), key=lambda package: (package["name"], package["version"]))
 
 
 def rust_section(platform):
@@ -111,8 +117,8 @@ def rust_section(platform):
             by_text.setdefault(" ".join(text.split()), (text, []))[1].append(label)
     parts = [RULE, f"Rust crates in the app ({len(crates)}), each under its own license", RULE, "",
              "The app around DigUp's search on Windows and Linux is written in Rust with Tauri (https://tauri.app). "
-             "These are the crates it is built from, with the license files they ship; a text several crates share "
-             "is printed once, after their names.", ""]
+             "These are the crates it is built from (on Windows, also the crates of the OCR program digup-ocr.exe), "
+             "with the license files they ship; a text several crates share is printed once, after their names.", ""]
     for text, labels in sorted(by_text.values(), key=lambda item: item[1][0]):
         parts += ["-" * 80, *labels, "-" * 80, "", text, ""]
     if without:

@@ -50,6 +50,7 @@
       <p class="shortcut-note" id="shortcut-note" hidden></p>
       <code class="command" id="shortcut-command" hidden></code>
 
+      <div id="updates">
       <h3>Updates</h3>
       <label class="option">
         <input type="checkbox" id="update-checks">
@@ -61,6 +62,7 @@
       <div class="update-row">
         <button class="link" id="update-version"></button>
         <button id="check-now">Check Now</button>
+      </div>
       </div>
     </section>
 
@@ -143,8 +145,8 @@
       </div>
       <h3>Privacy</h3>
       <p class="privacy-text">DigUp reads the folders you choose and keeps what it learns in its index, on this
-        computer. It goes online only to download its model, once, and to check for updates (General), which sends nothing
-        about your files.</p>
+        computer. It goes online only to download its model, once<span id="privacy-updates">, and to check for updates (General), which sends nothing
+        about your files</span>.</p>
       <p class="note"><span id="version"></span> <button class="link inline" id="licenses" hidden>Licenses</button></p>
     </section>
 

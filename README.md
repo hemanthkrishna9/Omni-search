@@ -22,13 +22,15 @@ of the Mac's SwiftUI app. This repo builds that port into an installer. Upstream
 ## What's local, and what goes online
 
 - Local: reading your files, the embeddings, the index, search. The model is in your user folder.
-- Online: the one-time model download, and a daily update check against **upstream's** feed (it sends nothing about
-  your files). You can turn the check off in Settings.
+- Online: the one-time model download, and nothing else. This build has no update check: new versions come from this
+  repo's Actions runs.
 
 ## Windows, compared with the Mac app
 
-- No text recognition in screenshots yet (`OCR.isAvailable = false` on Windows/Linux). Screenshots are still found by
-  what they show and by their file name.
+- Text in screenshots (recognized by their file name, e.g. "Screenshot …") and in scanned PDF pages is read with Windows'
+  built-in OCR, through `digup-ocr.exe` beside the helper; other pictures aren't OCR'd. It needs an OCR language
+  installed: most display languages come with one. To add one, go to Settings → Time & language → Language & region →
+  add a language with Optical character recognition.
 - RAW camera photos (CR2, NEF, ARW, DNG…) aren't read yet.
 - OneDrive files that live only in the cloud are skipped, never downloaded.
 - x64 only. A GPU with Vulkan is used when it runs the model faster than the CPU; otherwise the CPU is used.

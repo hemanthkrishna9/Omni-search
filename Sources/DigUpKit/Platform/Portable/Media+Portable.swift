@@ -1,5 +1,6 @@
 // Audio and video without AVFoundation (Linux, Windows): ffmpeg decodes, ffprobe measures. They're looked for beside
-// the helper, in $DIGUP_FFMPEG, then on PATH.
+// the helper, in $DIGUP_FFMPEG, then on PATH. (digup-ocr, the Windows text reader, is looked for the same way, with
+// $DIGUP_OCR.)
 #if !canImport(AVFoundation)
 import Foundation
 
@@ -7,10 +8,11 @@ enum FFmpeg {
     static let ffmpeg = find("ffmpeg")
     static let ffprobe = find("ffprobe")
 
-    static func find(_ name: String) -> String? {
+    /// `name` in the folder `variable` names, beside the helper, or on PATH.
+    static func find(_ name: String, variable: String = "DIGUP_FFMPEG") -> String? {
         let environment = ProcessInfo.processInfo.environment
         var folders: [String] = []
-        if let chosen = environment["DIGUP_FFMPEG"], !chosen.isEmpty { folders.append(chosen) }
+        if let chosen = environment[variable], !chosen.isEmpty { folders.append(chosen) }
         if let executable = Bundle.main.executableURL { folders.append(executable.deletingLastPathComponent().path) }
         for folder in folders {
             let candidate = folder + "/" + FileSystem.program(name)

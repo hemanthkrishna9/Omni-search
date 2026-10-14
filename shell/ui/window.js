@@ -936,10 +936,11 @@ function showMainMenu() {
      null, folders],
     null,
     ["Settings…", () => invoke("open_settings").catch(failed), `${MOD},`],
-    state.app.update
+    // No update feed in this build (updates.rs): no line for updates.
+    ...(!state.info.updatesAvailable ? [] : [state.app.update
       ? [`Update to DigUp ${state.app.update.version}…`, () => invoke("offer_update").catch(failed), null,
          state.app.update.state === "available"]
-      : ["Check for Updates…", () => invoke("check_for_updates").catch(failed)],
+      : ["Check for Updates…", () => invoke("check_for_updates").catch(failed)]]),
     null,
     ["Quit DigUp", () => invoke("quit_app").catch(failed)],
   ]);

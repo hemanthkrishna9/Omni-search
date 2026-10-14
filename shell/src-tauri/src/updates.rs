@@ -1,10 +1,16 @@
-//! In-app updates on Windows and Linux (the Mac app has Sparkle: Sources/DigUpApp/Updates.swift). Once a day, unless the
-//! person turned it off (Settings → General), DigUp reads its update feed (`plugins.updater.endpoints` in
-//! tauri.conf.json: updates/latest.json in DigUp's repository, which a release adds last). An update it finds waits
-//! quietly, as on the Mac: "Update to DigUp X…" in the tray menu, a dot on the tray icon, a line in the window's status
-//! bar. Choosing it shows what's new; then DigUp downloads it, checks its signature against the public key in
-//! tauri.conf.json, installs it and starts again. The Windows installer and the AppImage update themselves; a .deb needs
-//! admin rights to be replaced, so there the update's release page opens instead.
+//! In-app updates on Windows and Linux (the Mac app has Sparkle: Sources/DigUpApp/Updates.swift). This build has no
+//! update feed: `plugins.updater.endpoints` in tauri.conf.json is empty and so is its public key (the feed and key it
+//! had belonged to DigUp's upstream release, whose signing key this build's packages aren't signed with, so they could
+//! never have installed its updates). `ENABLED` is false: nothing reads a feed, the daily check never runs, and the
+//! menus and Settings leave Check for Updates… out; a new version is a new installer from this repository's releases or
+//! Actions. The rest of the module is kept as it was, for a build that has a feed and a key (set both, then `ENABLED`).
+//!
+//! With a feed: once a day, unless the person turned it off (Settings → General), DigUp reads its update feed
+//! (updates/latest.json in the repository, which a release adds last). An update it finds waits quietly, as on the Mac:
+//! "Update to DigUp X…" in the tray menu, a dot on the tray icon, a line in the window's status bar. Choosing it shows
+//! what's new; then DigUp downloads it, checks its signature against the public key in tauri.conf.json, installs it
+//! and starts again. The Windows installer and the AppImage update themselves; a .deb needs admin rights to be
+//! replaced, so there the update's release page opens instead.
 
 use crate::{changed, stop_helpers, Shell};
 use serde_json::{json, Value};
@@ -15,6 +21,9 @@ use tauri::{AppHandle, Manager};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_updater::{Update, UpdaterExt};
+
+/// Whether this build has an update feed to read. False: it has none (see above), so nothing here contacts the network.
+pub const ENABLED: bool = false;
 
 const DAY: u64 = 24 * 60 * 60;
 
@@ -107,6 +116,9 @@ fn log(shell: &Shell, line: &str) {
 /// the last check. Not in dev runs or debug builds (they'd read the real feed), unless `--debug-update-check` asks for
 /// one check at once (then `--debug-update-install` takes what it finds without asking).
 pub fn start(app: &AppHandle) {
+    if !ENABLED {
+        return;
+    }
     let shell = app.state::<Arc<Shell>>().inner().clone();
     log(&shell, &format!("DigUp {} started", app.package_info().version));
     let debug = shell.options.debug_update_check;
@@ -135,6 +147,14 @@ pub fn start(app: &AppHandle) {
 /// Reads the feed. `asked`: the person chose Check for Updates…, and hears the answer (an update is then offered at
 /// once); a daily check stays quiet and lets an update wait.
 pub async fn check(app: &AppHandle, asked: bool) {
+    if !ENABLED {
+        if asked {
+            tell(app, "Check for Updates", &format!("This build of DigUp ({}) has no update feed. To update, download \
+                a newer installer from this repository's releases or Actions and install it over this one.",
+                app.package_info().version));
+        }
+        return;
+    }
     let shell = app.state::<Arc<Shell>>().inner().clone();
     {
         let mut phase = shell.updates.phase.lock().unwrap();

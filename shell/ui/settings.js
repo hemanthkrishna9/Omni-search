@@ -60,6 +60,10 @@ function renderGeneral() {
 
 /// Updates: the daily check, and this version or the one waiting (updates.rs).
 function renderUpdates() {
+  // Without an update feed (updates.rs) there is nothing to switch or check.
+  $("updates").hidden = !info.updatesAvailable;
+  $("privacy-updates").hidden = !info.updatesAvailable;
+  if (!info.updatesAvailable) return;
   $("update-checks").checked = info.updateChecks;
   $("update-info").textContent = "Once a day DigUp asks GitHub for its newest version; nothing about your files is sent. "
     + (info.installsUpdates ? "Updates install with one click."

@@ -1,5 +1,5 @@
 // PDFs without PDFKit (Linux, Windows): PDFium, Chromium's PDF library, prebuilt (Vendor/pdfium, scripts/fetch-vendor.sh).
-// No OCR here, so a text layer that lost letters stays as it is.
+// OCR reads scans where there is any (Windows: digup-ocr); a text layer that lost letters stays as it is.
 #if !canImport(PDFKit)
 import CPDFium
 import Foundation
@@ -89,7 +89,7 @@ extension PDFExtractor {
     /// text layer came out in glyph order are rendered.
     static func pages(of url: URL, range: (Int) -> Range<Int>, minText: Int, renderPixels: Int, to folder: URL)
         throws -> (pages: [Page], total: Int, title: String?) {
-        try PDFium.withDocument(url) { document in
+        let read: (pages: [Page], total: Int, title: String?) = try PDFium.withDocument(url) { document in
             let total = Int(FPDF_GetPageCount(document))
             var pages: [Page] = []
             for index in range(total).clamped(to: 0..<total) {
@@ -113,6 +113,20 @@ extension PDFExtractor {
             }
             return (pages, total, PDFium.meta(document, "Title"))
         }
+        // A scan, or a page that's mostly a picture: its words come from OCR, for keyword search only, and its meaning
+        // stays the picture's vector (as on macOS). Not for a text layer in glyph order. Done after the document is
+        // closed: reading a page takes a while, and PDFium's lock would hold every other PDF meanwhile.
+        var pages = read.pages
+        if OCR.isAvailable {
+            for index in pages.indices where pages[index].garbled == nil {
+                guard let path = pages[index].imagePath else { continue }
+                let words = OCR.text(ofImageAt: URL(fileURLWithPath: path))
+                if words.count > pages[index].text.count {
+                    pages[index] = Page(number: pages[index].number, text: words, imagePath: path, ocr: true)
+                }
+            }
+        }
+        return (pages, read.total, read.title)
     }
 }
 

@@ -1,8 +1,9 @@
 #!/bin/bash
 # Checks DigUp's Windows installer the way someone first meets it: installed silently for the current user, a hidden
 # first launch goes through setup by itself (the model from MODELS, downloaded there when it isn't), indexes a picture,
-# a screenshot, a recording and a note with the model and finds the note from the search panel; then its helper runs
-# with only Windows on PATH (everything else it needs is beside it). In Git for Windows' bash; the packages workflow
+# a screenshot (named "Screenshot …", so the helper's OCR path runs), a recording and a note with the model and finds the
+# note from the search panel; then its helper runs with only Windows on PATH (everything else it needs is beside it), and
+# digup-ocr runs on its own. In Git for Windows' bash; the packages workflow
 # runs it after building the installer.
 #   MODELS=<folder> scripts/check-windows-package.sh <DigUp_x.y.z_x64-setup.exe>
 set -euo pipefail
@@ -18,13 +19,14 @@ win() { cygpath -m "$1"; }
 echo "installing $setup"
 MSYS_NO_PATHCONV=1 "$setup" /S
 installed=$(cygpath -u "$LOCALAPPDATA")/DigUp
-ls "$installed/DigUp.exe" "$installed/helper/digup.exe" > /dev/null
+ls "$installed/DigUp.exe" "$installed/helper/digup.exe" "$installed/helper/digup-ocr.exe" > /dev/null
 # The licenses of what the installer carries, beside the app.
 grep -q "GNU LESSER GENERAL PUBLIC LICENSE" "$installed/THIRD-PARTY-NOTICES.txt" || { echo "no license notices"; exit 1; }
 
 mkdir -p "$work/files"
-cp Tests/LlamaRuntimeTests/Reference/photo.jpg Tests/LlamaRuntimeTests/Reference/screen.png \
-  Tests/LlamaRuntimeTests/Reference/speech.wav docs/logo.png "$work/files/"
+cp Tests/LlamaRuntimeTests/Reference/photo.jpg Tests/LlamaRuntimeTests/Reference/speech.wav docs/logo.png "$work/files/"
+# Screenshots are recognized by their file name's prefix (Rules.swift).
+cp Tests/LlamaRuntimeTests/Reference/screen.png "$work/files/Screenshot screen.png"
 cat > "$work/files/recipe.txt" <<'TEXT'
 Lemon cake
 
@@ -69,7 +71,28 @@ echo "the helper with only Windows on PATH"
 helper=$installed/helper/digup.exe
 PATH="/c/Windows/System32:/c/Windows:/c/Windows/System32/Wbem" "$helper" status --index "$(win "$work/index")" \
   | tee "$work/status.txt"
-grep -Eq '^vectors: 5 in 5 segments' "$work/status.txt" || { echo "not every file has a vector"; exit 1; }
+grep -Eq '^vectors: 5 in [56] segments' "$work/status.txt" || { echo "not every file has a vector"; exit 1; }
 PATH="/c/Windows/System32:/c/Windows:/c/Windows/System32/Wbem" DIGUP_MODELS="$models" \
   "$helper" search "how long to bake the cake" --index "$(win "$work/index")" -n 3
+
+# The OCR program reads the screenshot with Windows' OCR. Exit 2 means no OCR language is installed (the CI runner may
+# have none): that is noted, not a failure. Exit 1 or anything else is. (The reference screenshot is drawn bars, not
+# letters, so empty output is fine; this checks the program runs, not what it reads.)
+echo "the OCR program"
+ocr=$installed/helper/digup-ocr.exe
+check_code=0
+"$ocr" --check > /dev/null 2> "$work/ocr-err.txt" || check_code=$?
+case $check_code in
+  0) echo "digup-ocr --check: an OCR engine is available" ;;
+  2) echo "note: no OCR language is installed here" ;;
+  *) echo "digup-ocr --check exited $check_code"; cat "$work/ocr-err.txt"; exit 1 ;;
+esac
+ocr_code=0
+"$ocr" "$(win "$work/files/Screenshot screen.png")" > "$work/ocr.txt" 2> "$work/ocr-err.txt" || ocr_code=$?
+case $ocr_code in
+  0) echo "digup-ocr read the screenshot ($(wc -c < "$work/ocr.txt") bytes of text)" ;;
+  2) echo "note: no OCR language is installed here, so digup-ocr was not checked" ;;
+  *) echo "digup-ocr exited $ocr_code"; cat "$work/ocr-err.txt"; exit 1 ;;
+esac
+[[ $check_code == "$ocr_code" ]] || { echo "digup-ocr --check ($check_code) and the image run ($ocr_code) disagree"; exit 1; }
 echo "ok"

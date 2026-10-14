@@ -30,7 +30,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::menu::{IsMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, State, WebviewUrl, WebviewWindowBuilder, WindowEvent, Wry};
 use tauri_plugin_autostart::ManagerExt;
@@ -501,6 +501,7 @@ fn window_info(shell: State<'_, Arc<Shell>>) -> Value {
         "state": shell.snapshot(),
         "search": search.map(|(query, kind)| json!({"query": query, "kind": kind})),
         "hasCode": !shell.code_folders().is_empty(),
+        "updatesAvailable": updates::ENABLED,
         "debugQuery": shell.options.debug_window,
         "debugSettings": shell.options.debug_settings,
         "debugCopy": shell.options.debug_copy,
@@ -1212,8 +1213,9 @@ fn settings_info(app: AppHandle, shell: State<'_, Arc<Shell>>) -> Value {
                 .collect::<Vec<_>>(),
         },
         "state": shell.snapshot(),
-        "updateChecks": !settings.update_checks_off,
-        "installsUpdates": updates::installs_itself(),
+        "updatesAvailable": updates::ENABLED,
+        "updateChecks": updates::ENABLED && !settings.update_checks_off,
+        "installsUpdates": updates::ENABLED && updates::installs_itself(),
         "version": app.package_info().version.to_string(),
         "licenses": licenses_file(&app).is_some(),
         "debug": shell.options.debug_settings,
@@ -1537,14 +1539,19 @@ fn make_tray(app: &AppHandle, shell: &Arc<Shell>) -> tauri::Result<()> {
     let index = MenuItem::with_id(app, "index", "Index Now", true, None::<&str>)?;
     let pause = MenuItem::with_id(app, "pause", "Pause Indexing", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
-    let check = MenuItem::with_id(app, "check", "Check for Updates…", true, None::<&str>)?;
+    // Without an update feed (updates.rs) the menu has no Check for Updates….
+    let check = updates::ENABLED
+        .then(|| MenuItem::with_id(app, "check", "Check for Updates…", true, None::<&str>))
+        .transpose()?;
     let quit_item = MenuItem::with_id(app, "quit", "Quit DigUp", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
-    let menu = Menu::with_items(
-        app,
-        &[&status, &separator, &search, &open, &folders, &index, &pause, &settings, &check,
-          &PredefinedMenuItem::separator(app)?, &quit_item],
-    )?;
+    let last = PredefinedMenuItem::separator(app)?;
+    let mut items: Vec<&dyn IsMenuItem<Wry>> = vec![&status, &separator, &search, &open, &folders, &index, &pause, &settings];
+    if let Some(check) = &check {
+        items.push(check);
+    }
+    items.extend([&last as &dyn IsMenuItem<Wry>, &quit_item]);
+    let menu = Menu::with_items(app, &items)?;
     // DigUp's logo, in its colors (tray_icon.rs).
     let look = tray_icon::Look::new(None, false);
     *shell.tray_look.lock().unwrap() = Some(look);

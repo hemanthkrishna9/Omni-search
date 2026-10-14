@@ -117,8 +117,9 @@ enum ModelSpeed {
     /// Each of `Costs`' fields as this machine compares. A cost's share that is the model's work goes as this machine ran
     /// the model (pages of text, documents and code as the text did, pictures as the picture, sound as the sound); the
     /// rest (reading files, decoding) stays as on the M4 Pro, since a slow processor slows it far less. A screenshot
-    /// here is a picture at the screenshot's budget with no OCR (OCR sets the M4 Pro's pace; Linux and Windows have
-    /// none yet). A second of video is its keyframes' share and its soundtrack's.
+    /// here is a picture at the screenshot's budget with no OCR (OCR sets the M4 Pro's pace; Windows reads text with
+    /// digup-ocr, which isn't timed here, and Linux has none yet). A second of video is its keyframes'
+    /// share and its soundtrack's.
     static func factors(_ times: Times) -> [String: Double] {
         let costs = Costs(), base = baseline
         func scaled(_ cost: Double, model: Double, here: Double) -> Double {

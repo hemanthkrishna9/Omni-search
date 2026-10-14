@@ -29,7 +29,12 @@ elif command -v glslc > /dev/null; then
 else
   FLAVOR=cpu
 fi
-STAMP="$TAG $(shasum -a 256 "$PATCH" 2>/dev/null | cut -c1-12 || sha256sum "$PATCH" | cut -c1-12) $FLAVOR"
+# Windows on ARM64 (see below) builds another set of libraries: its own stamp.
+WINARM64=
+if [[ ( $OS == MINGW* || $OS == MSYS* ) && ( ${DIGUP_ARCH:-} == arm64 || $(uname -m) == aarch64 || $(uname -m) == arm64 ) ]]; then
+  WINARM64=1
+fi
+STAMP="$TAG $(shasum -a 256 "$PATCH" 2>/dev/null | cut -c1-12 || sha256sum "$PATCH" | cut -c1-12) $FLAVOR${WINARM64:+-arm64}"
 if [[ ( -f "$OUT/lib/libllamacpp.a" || -f "$OUT/lib/libllama.so" || -f "$OUT/lib/llama.dll" ) \
       && "$(cat "$OUT/BUILD" 2>/dev/null)" == "$STAMP" ]]; then
   exit 0
@@ -84,7 +89,18 @@ if [[ $OS == Darwin ]]; then
 else
   GENERATOR=$(command -v ninja > /dev/null && echo Ninja || echo "Unix Makefiles")
   COMPILERS=()
-  if [[ $OS == MINGW* || $OS == MSYS* ]]; then
+  CPU_VARIANTS=(-DGGML_CPU_ALL_VARIANTS=ON)
+  if [[ -n $WINARM64 ]]; then
+    # Windows on ARM64. ggml's CPU variants (GGML_CPU_ALL_VARIANTS) aren't defined for ARM on Windows, and MSVC can't pick
+    # an ARM instruction set (only the build machine's, probed): clang (Swift's, on PATH) with one baseline every Windows
+    # ARM64 PC has (ARMv8.2 with dot products and half-precision arithmetic). Vulkan only when its SDK's glslc is found
+    # (LunarG's ARM64 SDK isn't installed by the workflow), so CPU only.
+    command -v clang > /dev/null && command -v clang++ > /dev/null \
+      || { echo "Windows on ARM64 builds llama.cpp with clang: none on PATH (Swift's toolchain has one)" >&2; exit 1; }
+    export CC=clang CXX=clang++
+    COMPILERS=(-DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++)
+    CPU_VARIANTS=(-DGGML_CPU_ARM_ARCH=armv8.2-a+dotprod+fp16)
+  elif [[ $OS == MINGW* || $OS == MSYS* ]]; then
     export CC=cl CXX=cl   # MSVC, not whatever else bash finds first
   elif [[ $(uname -m) == aarch64 && -z "${CC:-}" ]]; then
     # The arm64 CPU variants go up to armv9.2 with SME (-march=...+sme), which GCC before 14 doesn't know (Ubuntu
@@ -110,7 +126,7 @@ else
   esac
   # Shared libraries, the backends as modules (every CPU variant, so one build fits any x86-64 or arm64 machine).
   cmake -S "$SOURCE" -B "$BUILD" -G "$GENERATOR" -DCMAKE_BUILD_TYPE=Release "${COMPILERS[@]}" \
-    -DBUILD_SHARED_LIBS=ON -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON -DGGML_NATIVE=OFF "${GPU[@]}" \
+    -DBUILD_SHARED_LIBS=ON -DGGML_BACKEND_DL=ON "${CPU_VARIANTS[@]}" -DGGML_NATIVE=OFF "${GPU[@]}" \
     -DLLAMA_BUILD_MTMD=ON -DLLAMA_BUILD_COMMON=OFF -DLLAMA_BUILD_TOOLS=OFF -DLLAMA_BUILD_SERVER=OFF \
     -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_APP=OFF -DLLAMA_BUILD_UI=OFF -DLLAMA_OPENSSL=OFF \
     -DLLAMA_CURL=OFF > /dev/null

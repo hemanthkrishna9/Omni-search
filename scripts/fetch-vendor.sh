@@ -16,7 +16,12 @@ case "$(uname -s)-$(uname -m)" in
   Linux-x86_64) PDFIUM=pdfium-linux-x64 ;;
   Linux-aarch64) PDFIUM=pdfium-linux-arm64 ;;
   Darwin-arm64) PDFIUM=pdfium-mac-arm64 ;;
-  MINGW*|MSYS*|CYGWIN*) PDFIUM=pdfium-win-x64 ;;
+  MINGW*|MSYS*|CYGWIN*)
+    # Windows on ARM64: DIGUP_ARCH=arm64 (set by windows-arm64.yml; an emulated x64 bash reports x86_64), or a native bash.
+    case "${DIGUP_ARCH:-}-$(uname -m)" in
+      arm64-*|*-aarch64|*-arm64) PDFIUM=pdfium-win-arm64 ;;
+      *) PDFIUM=pdfium-win-x64 ;;
+    esac ;;
   *) echo "no PDFium build known for $(uname -s)-$(uname -m)"; exit 1 ;;
 esac
 T=Vendor/fetch-tmp

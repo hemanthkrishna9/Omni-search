@@ -5,7 +5,9 @@
 # all the licenses it carries (their texts land in Vendor/ffmpeg/licenses for the packages' notices). → Vendor/ffmpeg/bin
 # (out of git). Does nothing when the pinned versions are already built. Needs a C compiler, make, meson and ninja,
 # pkg-config, zlib's headers, and nasm on x86_64; on Windows, MSYS2's MINGW64 shell with its gcc, meson, ninja, nasm,
-# pkgconf and zlib (the executables then need no DLLs).
+# pkgconf and zlib (the executables then need no DLLs). On Windows on ARM64, MSYS2's CLANGARM64 shell instead, with
+# mingw-w64-clang-aarch64-clang, -meson, -ninja, -pkgconf and -zlib (clang, no nasm: dav1d and ffmpeg's ARM assembly
+# goes through clang).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 FFMPEG_VERSION=9.0.2
@@ -16,6 +18,15 @@ OUT=$PWD/Vendor/ffmpeg
 # The versions and this script (its lists of formats): either changing builds again.
 STAMP="ffmpeg $FFMPEG_VERSION dav1d $DAV1D_VERSION $(sha256sum "$0" | cut -c1-12)"
 if [[ "$(cat "$OUT/BUILD" 2>/dev/null)" == "$STAMP" ]]; then exit 0; fi
+
+# Windows on ARM64 (MSYS2's CLANGARM64 shell): clang is the compiler, there is no gcc for ffmpeg's configure to find.
+# The shell itself is x86_64 emulated (uname -m says x86_64, which configure would take as the target), so the target
+# is named. dav1d's meson needs nothing like it: it takes the host CPU from the compiler (the native aarch64 clang).
+cc=()
+if [[ "${MSYSTEM:-}" == CLANGARM64 ]]; then
+  export CC=clang CXX=clang++
+  cc=(--cc=clang --cxx=clang++ --arch=aarch64 --target-os=mingw32)
+fi
 
 T=$PWD/Vendor/ffmpeg-tmp
 rm -rf "$T" "$OUT"
@@ -53,7 +64,7 @@ case "$(uname -s)" in MINGW*|MSYS*) static=(--extra-ldflags=-static) ;; esac
 
 echo "ffmpeg $FFMPEG_VERSION"
 (cd "$T/ffmpeg-$FFMPEG_VERSION" &&
-  PKG_CONFIG_PATH="$T/deps/lib/pkgconfig" ./configure --prefix="$OUT" --pkg-config-flags=--static "${static[@]}" \
+  PKG_CONFIG_PATH="$T/deps/lib/pkgconfig" ./configure --prefix="$OUT" --pkg-config-flags=--static "${cc[@]}" "${static[@]}" \
     --disable-everything --disable-autodetect --disable-network --disable-doc --disable-debug --disable-ffplay \
     --enable-static --disable-shared --enable-zlib --enable-libdav1d \
     --enable-protocol=file,pipe \

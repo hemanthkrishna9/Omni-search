@@ -21,7 +21,9 @@ swift build -c release --product digup
 # (.cargo/config.toml).
 swift_root=$(cd "$(dirname "$(command -v swift)")/../../../.." && pwd)   # …/Swift from …/Swift/Toolchains/*/usr/bin
 swift_runtime=$(ls -d "$swift_root"/Runtimes/*/usr/bin | tail -1)
-crt=$(ls -d "$(cygpath "$VCToolsRedistDir")"x64/Microsoft.VC*.CRT | tail -1)   # set by the developer environment
+# Windows on ARM64 (DIGUP_ARCH=arm64, set by windows-arm64.yml): its runtime folder, in an arm64 developer environment.
+case "${DIGUP_ARCH:-}-$(uname -m)" in arm64-*|*-aarch64|*-arm64) crt_arch=arm64 ;; *) crt_arch=x64 ;; esac
+crt=$(ls -d "$(cygpath "$VCToolsRedistDir")$crt_arch"/Microsoft.VC*.CRT | tail -1)   # set by the developer environment
 helper=shell/src-tauri/helper
 rm -rf "$helper"
 mkdir -p "$helper"

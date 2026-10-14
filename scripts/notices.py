@@ -11,6 +11,8 @@ Run it from the packaging scripts, after scripts/fetch-vendor.sh, scripts/build-
 It stops if a license it needs is missing: the packages don't go out without their notices.
 """
 import json
+import os
+import platform as host
 import re
 import shutil
 import subprocess
@@ -74,6 +76,8 @@ def rust_crates(platform):
     """The crates in the app's binaries for the platform: Cargo's resolve graph from the app (and, on Windows, from the
     OCR program digup-ocr.exe), through normal dependencies, without proc-macro crates (they run while compiling)."""
     target = {"linux": "x86_64-unknown-linux-gnu", "windows": "x86_64-pc-windows-msvc"}[platform]
+    if platform == "windows" and (os.environ.get("DIGUP_ARCH") == "arm64" or host.machine().lower() in ("arm64", "aarch64")):
+        target = "aarch64-pc-windows-msvc"   # Windows on ARM64 (windows-arm64.yml)
     manifests = ["shell/src-tauri/Cargo.toml"] + (["ocr/Cargo.toml"] if platform == "windows" else [])
     found = {}   # cargo's package id (name, version and source) → the package; a crate both programs use is listed once
     for manifest in manifests:

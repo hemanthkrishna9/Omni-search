@@ -95,4 +95,19 @@ case $ocr_code in
   *) echo "digup-ocr exited $ocr_code"; cat "$work/ocr-err.txt"; exit 1 ;;
 esac
 [[ $check_code == "$ocr_code" ]] || { echo "digup-ocr --check ($check_code) and the image run ($ocr_code) disagree"; exit 1; }
+
+# With a language, a screenshot with words in it: digup-ocr reads the invoice number, and the helper indexes the
+# screenshot and finds it by that number (an exact word that only OCR could have given it).
+if [[ $check_code == 0 ]]; then
+  echo "OCR, end to end"
+  mkdir -p "$work/ocr-files"
+  cp Tests/DigUpKitTests/Pictures/ocr-invoice.png "$work/ocr-files/Screenshot invoice.png"
+  "$ocr" "$(win "$work/ocr-files/Screenshot invoice.png")" | tee "$work/ocr-invoice.txt"
+  grep -q 48213 "$work/ocr-invoice.txt" || { echo "digup-ocr didn't read the invoice number"; exit 1; }
+  PATH="/c/Windows/System32:/c/Windows:/c/Windows/System32/Wbem" DIGUP_MODELS="$models" \
+    "$helper" index "$(win "$work/ocr-files")" --index "$(win "$work/ocr-index")" > /dev/null
+  PATH="/c/Windows/System32:/c/Windows:/c/Windows/System32/Wbem" DIGUP_MODELS="$models" \
+    "$helper" search 48213 --index "$(win "$work/ocr-index")" -n 3 | tee "$work/ocr-search.txt"
+  grep -q "Screenshot invoice.png" "$work/ocr-search.txt" || { echo "searching 48213 didn't find the screenshot"; exit 1; }
+fi
 echo "ok"

@@ -73,16 +73,24 @@ jobs:
           path: models
           key: embeddinggemma-2-q8_0-bfcd298-windows
       - name: Russian as a second OCR language
-        timeout-minutes: 15
+        timeout-minutes: 10
         # The installer test reads English and Russian pictures: Russian OCR installed, and ru-RU after en-US in the
         # user's language list (digup-ocr reads with each of the person's languages).
         shell: pwsh
         run: |
           Add-WindowsCapability -Online -Name "Language.OCR~~~en-US~0.0.1.0"
-          Add-WindowsCapability -Online -Name "Language.OCR~~~ru-RU~0.0.1.0"
-          $l = Get-WinUserLanguageList
-          if (-not ($l | Where-Object LanguageTag -eq "ru-RU")) { $l.Add("ru-RU") }
-          Set-WinUserLanguageList $l -Force
+          # Russian comes from Windows Update, which can hang for a quarter of an hour on a runner: it gets six minutes,
+          # and without it the test skips only the check that needs Cyrillic letters (OCR_RUSSIAN).
+          $job = Start-Job { Add-WindowsCapability -Online -Name "Language.OCR~~~ru-RU~0.0.1.0" }
+          if (Wait-Job $job -Timeout 360) { Receive-Job $job } else { "Russian OCR didn't install in time" }
+          $state = (Get-WindowsCapability -Online -Name "Language.OCR~~~ru-RU~0.0.1.0").State
+          "Russian OCR: $state"
+          if ($state -eq "Installed") {
+            $l = Get-WinUserLanguageList
+            if (-not ($l | Where-Object LanguageTag -eq "ru-RU")) { $l.Add("ru-RU") }
+            Set-WinUserLanguageList $l -Force
+            "OCR_RUSSIAN=1" >> $env:GITHUB_ENV
+          }
           (Get-WinUserLanguageList).LanguageTag
       - name: The installer
         shell: bash

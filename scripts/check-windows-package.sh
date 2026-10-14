@@ -110,16 +110,22 @@ if [[ $check_code == 0 ]]; then
     "$helper" search 48213 --index "$(win "$work/ocr-index")" -n 3 | tee "$work/ocr-search.txt"
   grep -Eq '^ *1\..*Screenshot invoice\.png' "$work/ocr-search.txt" || { echo "searching 48213 didn't rank the screenshot first"; exit 1; }
 
-  # A second language: the runner has Russian OCR and ru-RU in the user's languages (the workflow's step before this),
-  # so digup-ocr reads with both engines and keeps the one whose script fits. The file name is not ASCII, which
+  # A second language: with Russian OCR and ru-RU in the user's languages (the workflow's step before this), digup-ocr
+  # reads with both engines, the one whose script fits first. The file name is not ASCII, which
   # exercises non-ASCII paths. (ё is left out of the assertions: OCR may give е.)
   echo "OCR in a second language"
   cp Tests/DigUpKitTests/Pictures/ocr-russian.png "$work/ocr-files/Screenshot счёт.png"
   "$ocr" "$(win "$work/ocr-files/Screenshot счёт.png")" | tee "$work/ocr-russian.txt"
   grep -q 73591 "$work/ocr-russian.txt" || { echo "digup-ocr didn't read the Russian invoice number"; exit 1; }
-  grep -q "оплачен" "$work/ocr-russian.txt" || { echo "digup-ocr didn't read the Russian word (is Russian OCR installed?)"; exit 1; }
-  "$ocr" "$(win "$work/ocr-files/Screenshot invoice.png")" > "$work/ocr-invoice.txt"
-  grep -q 48213 "$work/ocr-invoice.txt" || { echo "with two languages, digup-ocr didn't read the English invoice"; exit 1; }
+  # The words need Russian OCR, which the workflow installs when Windows Update lets it (OCR_RUSSIAN); the number and
+  # the file name are checked either way.
+  if [[ ${OCR_RUSSIAN:-} == 1 ]]; then
+    grep -q "оплачен" "$work/ocr-russian.txt" || { echo "digup-ocr didn't read the Russian word"; exit 1; }
+    "$ocr" "$(win "$work/ocr-files/Screenshot invoice.png")" > "$work/ocr-invoice.txt"
+    grep -q 48213 "$work/ocr-invoice.txt" || { echo "with two languages, digup-ocr didn't read the English invoice"; exit 1; }
+  else
+    echo "note: Russian OCR isn't installed here, so the Russian words weren't checked"
+  fi
 
   # A scan: a PDF whose only page is a picture of text, read with OCR when it is indexed.
   cp Tests/DigUpKitTests/Pictures/ocr-scan.pdf "$work/ocr-files/lease scan.pdf"

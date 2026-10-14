@@ -33,6 +33,18 @@ cp "$crt"/*.dll "$helper/"   # over the Swift runtime's copies of the same: the 
 cp Vendor/ffmpeg/bin/ffmpeg.exe Vendor/ffmpeg/bin/ffprobe.exe "$helper/"   # the small static build, no DLLs
 cp ocr/target/release/digup-ocr.exe "$helper/"
 
+# Every DLL a helper file imports should be beside it or come with Windows (a missing one stops digup.exe before it
+# starts). Listed, not fatal: a GPU driver's DLL, like Vulkan's loader, is fine to be missing here.
+if readobj=$(command -v llvm-readobj); then
+  for file in "$helper"/*.exe "$helper"/*.dll; do
+    "$readobj" --coff-imports "$file" | sed -n 's/^ *Name: //p' | sort -u | while read -r dll; do
+      dll=${dll%$'\r'}
+      case ${dll,,} in api-ms-*|ext-ms-*) continue ;; esac
+      [[ -e $helper/$dll || -e /c/Windows/System32/$dll ]] || echo "warning: $(basename "$file") imports $dll, which isn't there"
+    done
+  done
+fi
+
 # With the release's signing key (TAURI_SIGNING_PRIVATE_KEY, and its password) the packages that update themselves are
 # signed for in-app updates (a .sig beside each). Installed copies check those signatures with the public key in
 # tauri.conf.json (plugins.updater.pubkey): a release built without it could never update. This build has no update

@@ -95,10 +95,16 @@ else
     # an ARM instruction set (only the build machine's, probed): clang (Swift's, on PATH) with one baseline every Windows
     # ARM64 PC has (ARMv8.2 with dot products and half-precision arithmetic). Vulkan only when its SDK's glslc is found
     # (LunarG's ARM64 SDK isn't installed by the workflow), so CPU only.
-    command -v clang > /dev/null && command -v clang++ > /dev/null \
-      || { echo "Windows on ARM64 builds llama.cpp with clang: none on PATH (Swift's toolchain has one)" >&2; exit 1; }
-    export CC=clang CXX=clang++
-    COMPILERS=(-DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++)
+    # The clang is named by its path: Git's bash puts its own MinGW clang (/clangarm64/bin) first on PATH, and what it
+    # builds needs libc++, libunwind and libomp DLLs that no installed DigUp has. Visual Studio's ARM64 clang, else
+    # Swift's, targets the MSVC runtime the rest of the helper uses; and no OpenMP (ggml's own threads), so no libomp.
+    clang_dir=
+    for dir in "${VCINSTALLDIR:+$(cygpath -u "$VCINSTALLDIR")Tools/Llvm/ARM64/bin}" "$(dirname "$(command -v swift)")"; do
+      [[ -n $dir && -x $dir/clang.exe && -x $dir/clang++.exe ]] && { clang_dir=$dir; break; }
+    done
+    [[ -n $clang_dir ]] || { echo "Windows on ARM64 builds llama.cpp with Visual Studio's or Swift's clang: neither found" >&2; exit 1; }
+    export CC=$clang_dir/clang.exe CXX=$clang_dir/clang++.exe
+    COMPILERS=("-DCMAKE_C_COMPILER=$CC" "-DCMAKE_CXX_COMPILER=$CXX" -DGGML_OPENMP=OFF)
     CPU_VARIANTS=(-DGGML_CPU_ARM_ARCH=armv8.2-a+dotprod+fp16)
   elif [[ $OS == MINGW* || $OS == MSYS* ]]; then
     export CC=cl CXX=cl   # MSVC, not whatever else bash finds first

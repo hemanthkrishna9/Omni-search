@@ -9,8 +9,7 @@ import WinSDK
 #endif
 
 extension Rules {
-    /// What macOS gets from the type system, as extension sets. RAW pictures, which nothing here decodes yet, are still
-    /// images: they fail with a note that says so, rather than vanish.
+    /// What macOS gets from the type system, as extension sets. RAW pictures are images too (their embedded JPEG is read).
     static let imageExtensions: Set<String> = [
         "jpg", "jpeg", "jpe", "jfif", "png", "gif", "bmp", "tif", "tiff", "webp", "heic", "heif", "avif", "psd", "tga",
         "pnm", "ppm", "pgm", "cr2", "nef", "arw", "dng", "raf", "orf", "rw2",

@@ -11,19 +11,37 @@ extension ImageExtractor {
 
     /// Writes a downscaled copy for the model: decoded in full, turned the way the camera held it, scaled so the long
     /// side is `maxPixel`. stb reads JPEG, PNG, BMP, GIF, PSD, TGA and PNM here; HEIC, WebP, TIFF and AVIF go through
-    /// ffmpeg (`decodeWithFFmpeg`). RAW isn't read yet, and says so.
+    /// ffmpeg (`decodeWithFFmpeg`). RAW pictures are their largest embedded JPEG preview (`RAW.preview`).
     static func prepare(_ url: URL, maxPixel: Int, minSide: Int, to folder: URL, png: Bool) throws -> Prepared {
-        let exif = EXIF.read(url)
+        let ext = url.pathExtension.lowercased()
+        var exif = RAW.extensions.contains(ext) ? nil : EXIF.read(url)
         var image: RGBImage
         let width: Int, height: Int
         var storedWidth: Int32 = 0, storedHeight: Int32 = 0, channels: Int32 = 0
-        if stbi_info(url.path, &storedWidth, &storedHeight, &channels) != 0 {
+        if RAW.extensions.contains(ext) {
+            // The camera's own JPEG (the largest that decodes), through the same decoder and turning as a JPEG file.
+            let (preview, decoded) = try RAW.preview(of: url) { RGBImage.load($0) }
+            let shown = max(decoded.width, decoded.height)
+            // The RAW's own size when it says (as stored, like ImageIO's); else the preview's.
+            if let w = preview.width, let h = preview.height, max(w, h) >= shown {
+                (width, height) = (w, h)
+                // Really a small picture.
+                guard max(width, height) >= minSide else { throw ExtractError.tooSmall(width, height) }
+            } else {
+                (width, height) = (decoded.width, decoded.height)
+            }
+            // A small preview in a (probably big) RAW isn't a small picture: say what's wrong, not "small image".
+            guard shown >= minSide else {
+                throw ExtractError.unreadable("this RAW picture's embedded preview is only \(decoded.width)×\(decoded.height)")
+            }
+            image = decoded.oriented(preview.orientation)
+            exif = EXIF(orientation: preview.orientation, dateTimeOriginal: preview.taken)
+        } else if stbi_info(url.path, &storedWidth, &storedHeight, &channels) != 0 {
             (width, height) = (Int(storedWidth), Int(storedHeight))
             guard max(width, height) >= minSide else { throw ExtractError.tooSmall(width, height) }
             guard let decoded = RGBImage.load(url.path) else { throw ExtractError.unreadable("can't decode image") }
             image = decoded.oriented(exif?.orientation ?? 1)
         } else {
-            if let note = notReadYet(url.pathExtension.lowercased()) { throw ExtractError.unreadable(note) }
             if exif?.tiled == true {
                 throw ExtractError.unreadable("tiled TIFF pictures aren't read on this system yet")
             }
@@ -64,11 +82,6 @@ extension ImageExtractor {
         return image
     }
 
-    /// Why a picture of a kind neither stb nor ffmpeg decodes isn't readable, for the file's note.
-    static func notReadYet(_ ext: String) -> String? {
-        let raw: Set<String> = ["cr2", "nef", "arw", "dng", "raf", "orf", "rw2"]
-        return raw.contains(ext) ? "RAW pictures (\(ext.uppercased())) aren't read on this system yet" : nil
-    }
 }
 
 #if os(Windows)
